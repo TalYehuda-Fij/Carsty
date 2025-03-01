@@ -1,17 +1,36 @@
-using MongoDB.Driver;
-using MongoDB.Entities;
+using MassTransit;
 using Polly;
 using Polly.Extensions.Http;
+using SearchService.Consumers;
 using SearchService.Data;
-using SearchService.Models;
 using SearchService.Services;
+using System.Net;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
 builder.Services.AddControllers();
+builder.Services.AddAutoMapper(AppDomain.CurrentDomain.GetAssemblies());
 builder.Services.AddHttpClient<AuctionServiceHttpClient>().AddPolicyHandler(GetPolicy());
+builder.Services.AddMassTransit(x =>
+{
+    x.AddConsumersFromNamespaceContaining<AuctionCreatedConsumer>();
+
+    x.SetEndpointNameFormatter(new KebabCaseEndpointNameFormatter("search",false));
+
+    x.UsingRabbitMq((context, cfg) =>
+    {
+        cfg.ReceiveEndpoint("search-auction-created", e =>
+        {
+            e.ConfigureConsumer<AuctionCreatedConsumer>(context);
+            e.UseMessageRetry(r => r.Interval(5, 5));
+        });
+
+        cfg.ConfigureEndpoints(context);
+    });
+
+});
 
 var app = builder.Build();
 
@@ -38,5 +57,5 @@ app.Run();
 static IAsyncPolicy<HttpResponseMessage> GetPolicy()
     => HttpPolicyExtensions
     .HandleTransientHttpError()
-    .OrResult(msg => msg.StatusCode == System.Net.HttpStatusCode.NotFound)
+    .OrResult(msg => msg.StatusCode == HttpStatusCode.NotFound)
     .WaitAndRetryForeverAsync(_ => TimeSpan.FromSeconds(5));
