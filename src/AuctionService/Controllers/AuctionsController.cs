@@ -5,6 +5,7 @@ using AutoMapper;
 using AutoMapper.QueryableExtensions;
 using Contracts;
 using MassTransit;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -49,13 +50,12 @@ public class AuctionsController : ControllerBase
         return _mapper.Map<AuctionDto>(auction);
 
     }
-
+    [Authorize]
     [HttpPost]
     public async Task<ActionResult<AuctionDto>> CreateAuction(CreateAuctionDto auctionDto)
     {
         var auction = _mapper.Map<Auction>(auctionDto);
-        // add current user as seller
-        auction.Seller = "Test";
+        auction.Seller = User.Identity.Name;
         _context.Auctions.Add(auction);
 
         var newAuction = _mapper.Map<AuctionDto>(auction);
@@ -77,6 +77,8 @@ public class AuctionsController : ControllerBase
             .FirstOrDefaultAsync(x => x.Id == id);
 
         if (auction == null) return NotFound();
+
+        if (auction.Seller !=  User.Identity.Name) return Forbid();
 
 
         auction.Item.Make = updateAuctionDto.Make ?? auction.Item.Make;
@@ -100,9 +102,11 @@ public class AuctionsController : ControllerBase
         var auction = await _context.Auctions.FindAsync(id);
         if (auction == null) return NotFound();
 
-        // check seller == user name
-        
+        if (auction.Seller != User.Identity.Name) return Forbid();
+
         _context.Auctions.Remove(auction);
+
+        await _publishEndpoint.Publish<AuctionDeleted>(new AuctionDeleted { Id = auction.Id.ToString() });
 
         var result = await _context.SaveChangesAsync() > 0;
 
